@@ -240,6 +240,37 @@ def provision(
     return result
 
 
+def write_secrets_file(
+    path: Path,
+    client_id: str,
+    client_secret: str,
+    refresh_token: str,
+    folder_id: str,
+    sheet_id: str,
+) -> Path:
+    """Save the five values to a plain file for a safe Notepad copy.
+
+    Copying a ~100-character refresh token out of a console window has
+    failed twice in the field: wrapped console lines get copied with
+    invisible line breaks or truncated, and Google then rejects the token
+    with ``invalid_grant: Bad Request``. A file opened in Notepad copies
+    exactly. The file holds nothing but the five NAME=value lines - no
+    decoration - so even a select-all copies cleanly. It must be DELETED
+    once the GitHub secrets are saved.
+    """
+    lines = [
+        f"GOOGLE_CLIENT_ID={client_id}",
+        f"GOOGLE_CLIENT_SECRET={client_secret}",
+        f"GOOGLE_REFRESH_TOKEN={refresh_token}",
+        f"GOOGLE_DRIVE_FOLDER_ID={folder_id}",
+        f"GOOGLE_SHEET_ID={sheet_id}",
+    ]
+    # newline="" + explicit CRLF so classic Notepad renders five lines.
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write("\r\n".join(lines) + "\r\n")
+    return path
+
+
 def format_secrets_block(
     client_id: str,
     client_secret: str,
@@ -304,6 +335,12 @@ def main() -> int:
         action="store_true",
         help="Do not launch a browser; print the sign-in URL to copy by hand.",
     )
+    parser.add_argument(
+        "--no-secrets-file",
+        action="store_true",
+        help="Do not save the five values to github_secrets.txt; display "
+        "them in this window only.",
+    )
     args = parser.parse_args()
 
     setup_logging("INFO", to_file=False)
@@ -354,10 +391,29 @@ def main() -> int:
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
     )
     print(f"Drive folder: https://drive.google.com/drive/folders/{folder_id}")
+    if not args.no_secrets_file:
+        secrets_path = write_secrets_file(
+            args.client_secrets.parent / "github_secrets.txt",
+            client_id=installed.get("client_id", ""),
+            client_secret=installed.get("client_secret", ""),
+            refresh_token=credentials.refresh_token,
+            folder_id=folder_id,
+            sheet_id=sheet_id,
+        )
+        print(
+            "\nThe five values were ALSO saved to:\n"
+            f"    {secrets_path}\n"
+            "Open that file in Notepad and copy each value from there - a "
+            "Notepad copy cannot pick up the invisible line breaks that a "
+            "console-window copy can. DELETE the file once the GitHub "
+            "secrets are saved."
+        )
+
     print(
         "\nNEXT STEPS\n"
-        "  1. Copy the five values below into GitHub Actions secrets.\n"
-        "  2. Delete the client_secret.json file from this machine.\n"
+        "  1. Copy the five values into GitHub Actions secrets - from\n"
+        "     github_secrets.txt (via Notepad), each value as ONE line.\n"
+        "  2. Delete github_secrets.txt AND client_secret.json.\n"
         "  3. Trigger Actions -> NFL Weekly Automation -> Run workflow.\n"
     )
 

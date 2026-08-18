@@ -16,6 +16,10 @@ service-account*.json
 client_setup/
 David_Google_Setup.zip
 
+# Written by scripts/google_auth_setup.py for a safe Notepad copy of the
+# five GitHub secrets; deleted after setup. Never commit it, anywhere.
+github_secrets.txt
+
 # --- local machine helpers (CA bundles, scratch) ---------------------
 .local/
 

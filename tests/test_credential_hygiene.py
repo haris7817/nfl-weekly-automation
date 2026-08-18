@@ -88,6 +88,34 @@ class TestCredentialHealing:
         assert config.google_sheet_id == "sheet-xyz"
 
 
+class TestTokenShapeWarning:
+    def test_implausible_refresh_token_is_flagged_up_front(self, monkeypatch, caplog):
+        import logging
+
+        from src.google_auth import build_credentials
+
+        make_env(monkeypatch, GOOGLE_REFRESH_TOKEN="not-a-real-token")
+        config = Config.from_env(load_env_file=False)
+
+        with caplog.at_level(logging.WARNING):
+            build_credentials(config)
+
+        assert any("does not look like" in message for message in caplog.messages)
+
+    def test_plausible_token_produces_no_warning(self, monkeypatch, caplog):
+        import logging
+
+        from src.google_auth import build_credentials
+
+        make_env(monkeypatch)
+        config = Config.from_env(load_env_file=False)
+
+        with caplog.at_level(logging.WARNING, logger="nfl.google.auth"):
+            build_credentials(config)
+
+        assert not any("does not look like" in message for message in caplog.messages)
+
+
 class FailingRequest:
     def __init__(self, error):
         self._error = error

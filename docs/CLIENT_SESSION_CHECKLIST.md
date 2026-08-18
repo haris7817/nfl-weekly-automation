@@ -58,12 +58,18 @@ Ground rules for the whole session:
       Model** Drive folder (with its `Model/` subfolder) and the **NFL
       Weekly Analytics** spreadsheet with all five tabs, then ends with the
       five secret values as the **very last output**.
-- [ ] **Copy the five `GOOGLE_*=` lines before the window is closed.**
-      They are displayed exactly once and are not saved anywhere. If the
-      window is closed too early, simply run the helper again: the flow
-      forces a fresh consent (`prompt=consent`), so Google issues a new
-      refresh token with no need to revoke anything, and the existing
-      folder/Sheet are reused — no duplicates.
+- [ ] **Copy the five values from `github_secrets.txt`, opened in
+      Notepad — never from the console window.** Console copies of the
+      ~100-character refresh token have twice picked up invisible line
+      breaks/truncation, producing `invalid_grant: Bad Request` in the
+      cloud. The helper writes the file next to the `.bat` (opt out with
+      `--no-secrets-file`); each value is one `NAME=value` line. If
+      anything is lost, run the helper again: the flow forces a fresh
+      consent (`prompt=consent`), so Google issues a new refresh token
+      with no need to revoke anything, and the existing folder/Sheet are
+      reused — no duplicates.
+- [ ] **Delete `github_secrets.txt`** as soon as the five GitHub secrets
+      are saved (it is git-ignored everywhere as defense in depth).
 
 ## 4. GitHub secrets
 

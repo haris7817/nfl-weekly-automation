@@ -48,6 +48,16 @@ def build_credentials(config: Config):
             "google-auth is not installed. Run: pip install -r requirements.txt"
         ) from exc
 
+    if not config.google_refresh_token.startswith("1//"):
+        # Google user refresh tokens start with '1//'. Anything else is
+        # almost certainly a mangled copy/paste and will be rejected as
+        # invalid_grant - say so up front instead of failing cryptically.
+        log.warning(
+            "GOOGLE_REFRESH_TOKEN does not look like a Google refresh token "
+            "(expected to start with '1//'). Google will likely reject it; "
+            "re-copy the value from github_secrets.txt as one line."
+        )
+
     return Credentials(
         token=None,
         refresh_token=config.google_refresh_token,

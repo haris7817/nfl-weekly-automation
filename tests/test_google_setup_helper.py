@@ -124,6 +124,53 @@ class TestAuthorise:
             helper.authorise(fake_flow, helper.select_scopes(), use_console=False)
 
 
+class TestSecretsFile:
+    """github_secrets.txt: the Notepad-safe handoff channel added after
+    console-window copies mangled the refresh token twice in the field."""
+
+    def write(self, tmp_path):
+        helper = load_helper()
+        return helper.write_secrets_file(
+            tmp_path / "github_secrets.txt",
+            client_id="cid",
+            client_secret="csec",
+            refresh_token="1//tok-abc",
+            folder_id="fid",
+            sheet_id="sid",
+        )
+
+    def test_contains_exactly_the_five_env_lines(self, tmp_path):
+        path = self.write(tmp_path)
+
+        lines = path.read_text(encoding="utf-8").strip().splitlines()
+
+        assert lines == [
+            "GOOGLE_CLIENT_ID=cid",
+            "GOOGLE_CLIENT_SECRET=csec",
+            "GOOGLE_REFRESH_TOKEN=1//tok-abc",
+            "GOOGLE_DRIVE_FOLDER_ID=fid",
+            "GOOGLE_SHEET_ID=sid",
+        ]
+
+    def test_no_decoration_that_could_pollute_a_select_all(self, tmp_path):
+        """No banner/border lines: even Ctrl+A copies only clean values."""
+        path = self.write(tmp_path)
+
+        content = path.read_text(encoding="utf-8")
+
+        assert content.count("=") == 5  # one per NAME=value line, no borders
+        assert "ONLY ONCE" not in content
+
+    def test_each_value_sits_on_a_single_crlf_line(self, tmp_path):
+        path = self.write(tmp_path)
+
+        raw = path.read_bytes()
+
+        assert raw.count(b"\r\n") == 5
+        assert b"\n\n" not in raw
+        assert b"1//tok-abc\r\n" in raw  # token line ends cleanly
+
+
 class TestSecretsHandoff:
     def test_block_contains_the_refresh_token_in_env_format(self):
         helper = load_helper()
