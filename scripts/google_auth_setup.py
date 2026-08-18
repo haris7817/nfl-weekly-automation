@@ -27,8 +27,17 @@ is that a folder the client makes by hand in the browser would be
 invisible to it, so the helper creates them through the API instead.
 
 If the client insists on an existing hand-made folder, rerun with
-``--scope-drive-full`` and pass ``--drive-folder-id``; that requests the
-broader ``drive`` scope. Prefer the default.
+``--scope-drive-full`` and pass ``--drive-folder-id``. That requests the
+full ``drive`` scope, which Google classifies as **Restricted** (broad
+account-wide Drive access, subject to the heaviest verification tier).
+It exists strictly as a troubleshooting escape hatch and is NOT the
+normal production path - the production workflow uses ``drive.file`` only.
+
+Before generating the FINAL production refresh token, the OAuth consent
+screen must be moved out of "Testing" and published ("In production").
+Refresh tokens minted while the app is in Testing are revoked by Google
+after 7 days, which would silently kill the Friday automation a week
+after handoff.
 
 Security
 --------
@@ -54,11 +63,25 @@ from src.config import DEFAULT_GOOGLE_SCOPES  # noqa: E402
 from src.logging_utils import setup_logging  # noqa: E402
 from src.net import enable_system_trust_store  # noqa: E402
 
+#: Restricted scope used only by the --scope-drive-full escape hatch. The
+#: full drive scope covers every Sheets method this project calls, so no
+#: additional Sheets scope is requested even in that mode.
 DRIVE_FULL_SCOPE = "https://www.googleapis.com/auth/drive"
-SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 
 DEFAULT_FOLDER_NAME = "NFL Weekly Model"
 DEFAULT_SHEET_NAME = "NFL Weekly Analytics"
+
+
+def select_scopes(scope_drive_full: bool = False) -> list:
+    """Scopes to request at consent time.
+
+    Normal production path: exactly ``drive.file`` (non-sensitive).
+    Escape hatch: exactly the full ``drive`` scope (Restricted) - never
+    both, and never the sensitive ``spreadsheets`` scope.
+    """
+    if scope_drive_full:
+        return [DRIVE_FULL_SCOPE]
+    return list(DEFAULT_GOOGLE_SCOPES)
 
 
 def authorise(client_secrets: Path, scopes, use_console: bool):
@@ -118,8 +141,10 @@ def main() -> int:
     parser.add_argument(
         "--scope-drive-full",
         action="store_true",
-        help="Request full Drive access (only needed to write into a folder "
-        "the client created by hand in the browser).",
+        help="TROUBLESHOOTING ONLY: request the full Drive scope, which "
+        "Google classifies as Restricted. Only needed to write into a "
+        "folder the client created by hand in the browser. The normal "
+        "production path is the non-sensitive drive.file scope.",
     )
     parser.add_argument(
         "--console",
@@ -144,11 +169,7 @@ def main() -> int:
         )
         return 2
 
-    scopes = (
-        [DRIVE_FULL_SCOPE, SHEETS_SCOPE]
-        if args.scope_drive_full
-        else list(DEFAULT_GOOGLE_SCOPES)
-    )
+    scopes = select_scopes(args.scope_drive_full)
     print("Requesting scopes:")
     for scope in scopes:
         print(f"  - {scope}")

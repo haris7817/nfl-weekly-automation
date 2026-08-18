@@ -10,7 +10,9 @@ and refreshes a Google Sheet.
 The full project specification this system was built against lives at
 [`docs/NFL_Weekly_Automation_End_to_End_Implementation_Guide.md`](docs/NFL_Weekly_Automation_End_to_End_Implementation_Guide.md).
 This README covers day-to-day operation; the guide covers the requirements,
-design decisions and acceptance criteria behind it.
+design decisions and acceptance criteria behind it. The step-by-step plan
+for the one-time Google authorization session is at
+[`docs/CLIENT_SESSION_CHECKLIST.md`](docs/CLIENT_SESSION_CHECKLIST.md).
 
 ---
 
@@ -348,10 +350,15 @@ Google password** — sign-in happens on Google's own page.
    project (suggested name: *NFL Weekly Automation*) **under the client's
    account**, so the client owns it.
 2. Enable the **Google Drive API** and the **Google Sheets API**.
-3. Configure the OAuth consent screen. While it is in "Testing", add the
-   client's address as a test user.
+3. Configure the OAuth consent screen.
 4. Create an **OAuth client ID** of type **Desktop app** and download the JSON.
-5. Run the helper:
+5. **Publish the app: set the consent screen's publishing status to
+   "In production" *before* generating the production refresh token.**
+   Refresh tokens minted while the status is "Testing" are revoked by Google
+   after 7 days, which would silently kill the Friday automation a week
+   after handoff. Because the app requests only a non-sensitive scope (see
+   below), publishing requires no Google verification review.
+6. Run the helper:
 
    ```powershell
    python scripts/google_auth_setup.py --client-secrets client_secret.json
@@ -360,19 +367,34 @@ Google password** — sign-in happens on Google's own page.
    It opens Google's consent screen, captures a refresh token, creates the
    Drive folder and the spreadsheet with all five tabs, and prints the five
    values to store as GitHub secrets.
-6. Paste those five values into GitHub Actions secrets.
-7. **Delete `client_secret.json` from the machine.**
+7. Paste those five values into GitHub Actions secrets.
+8. **Delete `client_secret.json` from the machine.**
 
-### Why the setup helper creates the folder and the Sheet
+### One scope only: `drive.file`
 
-The automation requests the narrow `drive.file` scope, which grants access
-**only to files the app itself created**. It can never read the rest of the
-client's Drive. The trade-off is that a folder created by hand in the browser
-would be invisible to it — hence the helper creates them via the API.
+The production workflow requests exactly one OAuth scope:
 
-If an existing hand-made folder must be used, rerun the helper with
-`--scope-drive-full --drive-folder-id <id>`, which requests broader access.
-Prefer the default.
+```
+https://www.googleapis.com/auth/drive.file
+```
+
+It is **non-sensitive** in Google's classification and grants access **only
+to files the app itself created** — the automation can never read the rest
+of the client's Drive. No separate Sheets scope is needed: the Sheets API
+accepts `drive.file` for every operation this project performs on the
+spreadsheet the app created.
+
+The trade-off is that a folder or Sheet created **by hand in the browser is
+invisible** to the app. Do not manually create the production folder or
+spreadsheet and expect the automation to find them — the setup helper
+creates both through the API, which is what makes them visible under
+`drive.file`.
+
+If an existing hand-made folder absolutely must be used, the helper's
+`--scope-drive-full --drive-folder-id <id>` escape hatch requests the full
+`drive` scope instead. That scope is classified **Restricted** by Google
+(broad account-wide Drive access); it exists for troubleshooting only and
+is **not** the production path.
 
 ---
 
@@ -494,8 +516,11 @@ You are rerunning a week whose games have all finished. Add
 
 ### `invalid_grant` from Google
 
-The refresh token has been revoked or expired. Rerun
-`scripts/google_auth_setup.py` and update `GOOGLE_REFRESH_TOKEN`.
+The refresh token has been revoked or expired. The most common cause: the
+token was generated while the OAuth consent screen was still in "Testing"
+status — Google revokes those after 7 days. Set the publishing status to
+"In production", rerun `scripts/google_auth_setup.py`, and update
+`GOOGLE_REFRESH_TOKEN`.
 
 ### Google returns 404 for the folder or spreadsheet
 
@@ -525,8 +550,10 @@ uploaded even when the job fails.
   workflow fails the build if such a file is ever tracked.
 - The client's Google password is never requested, seen, or stored — sign-in
   happens on Google's own page.
-- Scopes are the narrowest that work: `drive.file` (only files this app
-  created) and `spreadsheets`.
+- The production workflow requests a single, non-sensitive scope:
+  `drive.file` — access only to files this app created. The full-Drive
+  scope (Restricted) exists solely behind the setup helper's
+  `--scope-drive-full` troubleshooting flag and is never used in production.
 - Secrets are never printed; IDs are redacted in logs.
 - The client can revoke access at any time at
   [myaccount.google.com/permissions](https://myaccount.google.com/permissions).

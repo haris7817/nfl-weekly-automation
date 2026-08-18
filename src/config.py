@@ -30,13 +30,15 @@ DEFAULT_RETRAIN_EVERY_WEEKS = 4
 
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 
-# Narrowest scopes that still let the automation create and maintain its own
-# Drive folders/files and its own spreadsheet (implementation guide 22.4).
-# `drive.file` limits the app to files it created itself, which is why the
-# setup helper creates the Drive folder and the Sheet through the API.
+# The single scope the production workflow requests (implementation guide
+# 22.4). `drive.file` is non-sensitive and limits the app to files it created
+# itself - and because the Sheets API accepts it for every method this
+# project calls (create, get, batchUpdate, values.*) on app-created
+# spreadsheets, the separate sensitive `spreadsheets` scope is unnecessary.
+# This is why the setup helper must create the Drive folder and the Sheet
+# through the API: hand-made files are invisible under drive.file.
 DEFAULT_GOOGLE_SCOPES = (
     "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/spreadsheets",
 )
 
 
