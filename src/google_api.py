@@ -58,7 +58,32 @@ def execute(request: Any, description: str) -> Any:
     except Exception as exc:
         status = _status_of(exc)
         hint = ""
-        if status == 403:
+        text = str(exc)
+        if "invalid_grant" in text:
+            if "Bad Request" in text:
+                hint = (
+                    " Google rejected the stored refresh token as MALFORMED "
+                    "(invalid_grant: Bad Request). This almost always means "
+                    "the GOOGLE_REFRESH_TOKEN secret was damaged when it was "
+                    "copied: a line break picked up from a wrapped console "
+                    "window, a truncated selection, or the "
+                    "'GOOGLE_REFRESH_TOKEN=' prefix pasted into the value. "
+                    "Re-enter the secret as ONE continuous line (it starts "
+                    "with '1//' and contains no spaces). If the token is no "
+                    "longer available, rerun scripts/google_auth_setup.py - "
+                    "it is safe to repeat and reuses the existing folder and "
+                    "Sheet."
+                )
+            else:
+                hint = (
+                    " The refresh token has been revoked or has expired "
+                    "(invalid_grant). If the OAuth consent screen is still "
+                    "in 'Testing' status, Google revokes its tokens after 7 "
+                    "days - publish the app ('In production'), then rerun "
+                    "scripts/google_auth_setup.py and update the "
+                    "GOOGLE_REFRESH_TOKEN secret."
+                )
+        elif status == 403:
             hint = (
                 " This usually means the OAuth scopes do not cover the "
                 "operation, or the account cannot write to this resource."

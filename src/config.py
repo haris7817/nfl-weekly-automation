@@ -69,6 +69,35 @@ def _get_str(name: str) -> Optional[str]:
     return raw or None
 
 
+def _get_credential(name: str) -> Optional[str]:
+    """Like :func:`_get_str`, but heals common copy/paste damage.
+
+    OAuth client IDs, client secrets, refresh tokens and Drive/Sheet IDs
+    never contain whitespace - but a value copied out of a console window
+    whose line wrapped picks up an invisible line break, and a whole
+    ``NAME=value`` line sometimes gets pasted as the value. Both produce
+    Google's baffling ``invalid_grant: Bad Request``, so they are repaired
+    here rather than left to fail in the cloud.
+    """
+    raw = _get_str(name)
+    if raw is None:
+        return None
+    value = "".join(raw.split())  # remove ALL whitespace, embedded included
+    prefix = f"{name}="
+    if value.startswith(prefix):
+        value = value[len(prefix):]
+    if value != raw:
+        import logging
+
+        logging.getLogger("nfl.config").warning(
+            "%s contained whitespace/line breaks or a pasted '%s' prefix; "
+            "the value was repaired automatically.",
+            name,
+            prefix,
+        )
+    return value or None
+
+
 @dataclass
 class Config:
     """Runtime configuration for a single weekly run."""
@@ -123,11 +152,11 @@ class Config:
                 "INCLUDE_COMPLETED_WEEK_GAMES", False
             ),
             log_level=(_get_str("LOG_LEVEL") or "INFO").upper(),
-            google_client_id=_get_str("GOOGLE_CLIENT_ID"),
-            google_client_secret=_get_str("GOOGLE_CLIENT_SECRET"),
-            google_refresh_token=_get_str("GOOGLE_REFRESH_TOKEN"),
-            google_drive_folder_id=_get_str("GOOGLE_DRIVE_FOLDER_ID"),
-            google_sheet_id=_get_str("GOOGLE_SHEET_ID"),
+            google_client_id=_get_credential("GOOGLE_CLIENT_ID"),
+            google_client_secret=_get_credential("GOOGLE_CLIENT_SECRET"),
+            google_refresh_token=_get_credential("GOOGLE_REFRESH_TOKEN"),
+            google_drive_folder_id=_get_credential("GOOGLE_DRIVE_FOLDER_ID"),
+            google_sheet_id=_get_credential("GOOGLE_SHEET_ID"),
             google_scopes=scopes,
         )
 

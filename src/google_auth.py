@@ -87,7 +87,7 @@ def _build_service(name: str, version: str, config: Config):
             "needs to re-authorise via scripts/google_auth_setup.py."
         ) from exc
 
-    log.info("Google %s v%s client ready.", name, version)
+    log.info("Google %s %s client ready.", name, version)
     return service
 
 
