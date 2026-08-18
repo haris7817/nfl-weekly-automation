@@ -34,14 +34,11 @@ import json
 import sys
 import traceback
 from datetime import datetime, timezone
-from pathlib import Path
-
 import pandas as pd
 
 from src.config import Config
 from src.epa import InsufficientDataError, build_epa_splits, empty_splits_frame
 from src.fair_line import (
-    FAIR_LINE_COLUMNS,
     STATUS_PROJECTED,
     TrainingError,
     format_projection_table,

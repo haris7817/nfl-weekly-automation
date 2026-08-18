@@ -48,7 +48,6 @@ from pathlib import Path
 
 from src.fair_line import (
     DEFAULT_N,
-    MIN_TRAILING_GAMES,
     TrainingError,
     format_fit_report,
     format_projection_table,

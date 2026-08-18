@@ -7,7 +7,6 @@ records every call so the idempotency rules can be asserted directly.
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from src.fair_line import FAIR_LINE_COLUMNS, STATUS_PROJECTED
 from src.google_sheets import (

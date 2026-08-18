@@ -12,8 +12,6 @@ ever logged - only whether each one is present.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from .config import TOKEN_URI, Config
 from .logging_utils import get_logger, redact
 

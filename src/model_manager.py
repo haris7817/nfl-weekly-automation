@@ -29,7 +29,6 @@ import pandas as pd
 from .fair_line import (
     DEFAULT_N,
     MIN_TRAILING_GAMES,
-    TrainingError,
     build_training_set,
     fit_model,
 )
