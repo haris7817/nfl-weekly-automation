@@ -3,20 +3,16 @@ name: NFL Weekly Automation
 # ---------------------------------------------------------------------
 # Schedule: every Friday at 18:00 America/Los_Angeles.
 #
-# GitHub Actions cron is ALWAYS UTC - the `schedule:` block has no
-# timezone key (that syntax belongs to other CI systems). So Pacific time
-# is handled the supported way: fire at both possible UTC equivalents and
-# let a guard step decide which one is really 18:00 in Los Angeles.
+# GitHub Actions supports an IANA `timezone` field on cron schedules
+# (added in the late-March 2026 Actions update), so daylight-saving
+# changes are handled natively - no UTC conversion, no dual-cron
+# workaround.
 #
-#   18:00 PDT (UTC-7, roughly Mar-Nov) -> 01:00 UTC Saturday
-#   18:00 PST (UTC-8, roughly Nov-Mar) -> 02:00 UTC Saturday
-#
-# Exactly one of the two passes the guard on any given Friday, so the
-# workflow runs once a week across daylight-saving changes without the
-# schedule ever being edited.
-#
-# Note: GitHub may start a scheduled job late when the platform is busy.
-# Treat 18:00 as a target, not a hard deadline.
+# Note: GitHub runs `schedule:` triggers on shared infrastructure, and
+# the actual start can lag the scheduled minute - during peak load by
+# 15 minutes to 2+ hours. Treat 18:00 as a target, not a hard deadline.
+# Scheduled workflows are also disabled automatically in repositories
+# with no activity for 60 days; a commit or a manual run re-enables them.
 # ---------------------------------------------------------------------
 
 on:
@@ -47,8 +43,8 @@ on:
         default: false
 
   schedule:
-    - cron: "0 1 * * 6"   # 18:00 Friday Pacific Daylight Time
-    - cron: "0 2 * * 6"   # 18:00 Friday Pacific Standard Time
+    - cron: "0 18 * * 5"
+      timezone: "America/Los_Angeles"
 
 # Never let two runs publish to the same Sheet at once.
 concurrency:
@@ -67,42 +63,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Confirm this is really Friday 18:00 in Los Angeles
-        id: guard
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "Manual run - skipping the time guard."
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          PACIFIC_DOW=$(TZ=America/Los_Angeles date +%u)   # 1=Monday .. 5=Friday
-          PACIFIC_HOUR=$(TZ=America/Los_Angeles date +%H)
-          PACIFIC_NOW=$(TZ=America/Los_Angeles date -Is)
-          echo "Pacific time is now $PACIFIC_NOW (day $PACIFIC_DOW, hour $PACIFIC_HOUR)."
-          if [ "$PACIFIC_DOW" = "5" ] && [ "$PACIFIC_HOUR" = "18" ]; then
-            echo "This is the real Friday 18:00 Pacific slot - proceeding."
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "This cron fired for the other daylight-saving offset - skipping."
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Set up Python
-        if: steps.guard.outputs.proceed == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
 
       - name: Install dependencies
-        if: steps.guard.outputs.proceed == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Build run arguments
-        if: steps.guard.outputs.proceed == 'true'
         id: args
         run: |
           set -euo pipefail
@@ -122,7 +94,6 @@ jobs:
           echo "value=$ARGS" >> "$GITHUB_OUTPUT"
 
       - name: Run weekly workflow
-        if: steps.guard.outputs.proceed == 'true'
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -138,7 +109,7 @@ jobs:
       # Runs even when the step above failed, so a Google outage still
       # leaves the analytics downloadable from the run page.
       - name: Upload CSV outputs
-        if: always() && steps.guard.outputs.proceed == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nfl-outputs-${{ github.run_number }}
@@ -149,7 +120,7 @@ jobs:
           retention-days: 90
 
       - name: Upload logs
-        if: always() && steps.guard.outputs.proceed == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nfl-logs-${{ github.run_number }}

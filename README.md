@@ -7,6 +7,11 @@ and refreshes a Google Sheet.
 
 **It runs in GitHub's cloud, so your PC does not need to be on.**
 
+The full project specification this system was built against lives at
+[`docs/NFL_Weekly_Automation_End_to_End_Implementation_Guide.md`](docs/NFL_Weekly_Automation_End_to_End_Implementation_Guide.md).
+This README covers day-to-day operation; the guide covers the requirements,
+design decisions and acceptance criteria behind it.
+
 ---
 
 ## Table of contents
@@ -397,22 +402,18 @@ retraining, including completed games, and skipping Google.
 
 ### How the Friday 6 PM Pacific schedule works
 
-GitHub Actions cron is **always UTC** — the `schedule:` block has no timezone
-key, whatever some examples suggest. So the workflow fires at both UTC times
-that could be 6 PM Pacific, and a guard step checks the actual Pacific
-wall-clock time and stops the one that isn't:
+GitHub Actions supports an IANA `timezone` field on cron schedules (added in
+the late-March 2026 Actions update), so the workflow states the requirement
+directly and daylight-saving changes are handled by GitHub:
 
 ```yaml
 schedule:
-  - cron: "0 1 * * 6"   # 18:00 Friday PDT (UTC-7)
-  - cron: "0 2 * * 6"   # 18:00 Friday PST (UTC-8)
+  - cron: "0 18 * * 5"
+    timezone: "America/Los_Angeles"
 ```
 
-Exactly one passes the guard each Friday, so daylight saving is handled without
-ever editing the schedule.
-
-GitHub may start scheduled jobs late under platform load. Treat 6:00 PM as a
-target, not a hard deadline.
+GitHub may start scheduled jobs late under platform load — during peak windows
+by 15 minutes to 2+ hours. Treat 6:00 PM as a target, not a hard deadline.
 
 ---
 
@@ -504,10 +505,10 @@ printed, not IDs of items created by hand in the browser.
 
 ### The scheduled run did not fire
 
-Check *Actions* for a skipped run — the Pacific-time guard logs the local time
-and why it stopped. Note that GitHub disables scheduled workflows in
-repositories with no activity for 60 days; a commit or a manual run re-enables
-them.
+Scheduled runs can start well after the scheduled minute under platform load —
+check the *Actions* tab before assuming it was missed. Note that GitHub
+disables scheduled workflows in repositories with no activity for 60 days; a
+commit or a manual run re-enables them.
 
 ### The workflow failed but I need the numbers
 
