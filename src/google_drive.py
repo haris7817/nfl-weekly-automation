@@ -291,6 +291,83 @@ def create_root_folder(service, name: str) -> str:
     return created["id"]
 
 
+def find_file_by_name(
+    service,
+    name: str,
+    parent_id: Optional[str] = None,
+    mime_type: Optional[str] = None,
+) -> Optional[str]:
+    """Find a file the app can see, by name and optionally parent/type.
+
+    Under the drive.file scope this can only ever match files this app
+    created - which is exactly what makes it safe for the setup helper to
+    reuse resources from an earlier authorization instead of duplicating
+    them: the file<->app association is bound to the OAuth client, not to
+    any individual token, so it survives re-consent.
+    """
+    clauses = [f"name = '{_escape(name)}'", "trashed = false"]
+    if parent_id:
+        clauses.append(f"'{parent_id}' in parents")
+    if mime_type:
+        clauses.append(f"mimeType = '{mime_type}'")
+    files = execute(
+        service.files().list(
+            q=" and ".join(clauses),
+            spaces="drive",
+            fields="files(id, name)",
+            pageSize=10,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        ),
+        f"Drive lookup for {name!r}",
+    ).get("files", [])
+    if len(files) > 1:
+        log.warning(
+            "Drive has %d files named %r visible to this app; using the "
+            "first.",
+            len(files),
+            name,
+        )
+    return files[0]["id"] if files else None
+
+
+def get_or_create_root_folder(service, name: str) -> tuple:
+    """Reuse the app's existing top-level folder or create it.
+
+    Returns ``(folder_id, created)``. Rerunning the setup helper must not
+    produce 'NFL Weekly Model (2)' next to the original.
+    """
+    existing = find_file_by_name(service, name, mime_type=FOLDER_MIME)
+    if existing:
+        log.info("Reusing the existing Drive folder %r.", name)
+        return existing, False
+    return create_root_folder(service, name), True
+
+
+def ensure_file_in_folder(service, file_id: str, folder_id: str) -> None:
+    """Idempotently make ``folder_id`` the file's parent."""
+    current = execute(
+        service.files().get(
+            fileId=file_id, fields="parents", supportsAllDrives=True
+        ),
+        "Drive parent lookup",
+    )
+    parents = current.get("parents", [])
+    if folder_id in parents:
+        return
+    execute(
+        service.files().update(
+            fileId=file_id,
+            addParents=folder_id,
+            removeParents=",".join(parents),
+            fields="id, parents",
+            supportsAllDrives=True,
+        ),
+        "Drive move into the project folder",
+    )
+    log.info("Moved the file into the project folder.")
+
+
 def write_json_tempfile(data: dict, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:

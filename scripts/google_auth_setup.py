@@ -13,10 +13,22 @@ What it does
    page - never into this tool, and never shares it with anyone.
 2. Captures the resulting **refresh token**, which is what lets the
    unattended Friday job get fresh access tokens while the client's PC is
-   off.
-3. Creates the Drive folder ("NFL Weekly Model") and the spreadsheet
-   ("NFL Weekly Analytics") with all five tabs.
-4. Prints the five values to paste into GitHub Actions secrets.
+   off. The flow always requests offline access with forced consent
+   (``access_type=offline``, ``prompt=consent``), so Google issues a new
+   refresh token on every run - including reruns, with no need to revoke
+   the earlier grant.
+3. Creates - or, on a rerun, REUSES - the Drive folder ("NFL Weekly
+   Model") and the spreadsheet ("NFL Weekly Analytics") with all five
+   tabs. Under the drive.file scope the file<->app association is bound
+   to the OAuth client, not to a token, so resources created by an
+   earlier authorization are rediscovered instead of duplicated.
+4. Ends with the five GitHub Actions secret values as the VERY LAST
+   output. They are displayed exactly once and are not written anywhere
+   else - copy them before closing the window.
+
+If Google does not return a refresh token, the helper FAILS loudly
+instead of reporting success: without that token the Friday automation
+cannot run, so a "success" without it would be a lie.
 
 Why it creates the Drive folder and Sheet
 -----------------------------------------
@@ -68,8 +80,18 @@ from src.net import enable_system_trust_store  # noqa: E402
 #: additional Sheets scope is requested even in that mode.
 DRIVE_FULL_SCOPE = "https://www.googleapis.com/auth/drive"
 
+SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet"
+
 DEFAULT_FOLDER_NAME = "NFL Weekly Model"
 DEFAULT_SHEET_NAME = "NFL Weekly Analytics"
+
+SECRET_NAMES = (
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GOOGLE_REFRESH_TOKEN",
+    "GOOGLE_DRIVE_FOLDER_ID",
+    "GOOGLE_SHEET_ID",
+)
 
 
 def select_scopes(scope_drive_full: bool = False) -> list:
@@ -85,35 +107,166 @@ def select_scopes(scope_drive_full: bool = False) -> list:
 
 
 def authorise(client_secrets: Path, scopes, use_console: bool):
+    """Run the consent flow and return credentials WITH a refresh token.
+
+    ``access_type="offline"`` asks Google for a refresh token and
+    ``prompt="consent"`` forces the consent screen even when the account
+    has authorised this client before - Google only reissues a refresh
+    token on a consented exchange, so both are required for reruns to
+    work without revoking anything.
+
+    Raises ``SystemExit`` if no refresh token comes back: that outcome
+    must never be reported as success.
+    """
     from google_auth_oauthlib.flow import InstalledAppFlow
 
     flow = InstalledAppFlow.from_client_secrets_file(str(client_secrets), list(scopes))
 
+    flow_kwargs = {
+        "port": 0,
+        "access_type": "offline",
+        "prompt": "consent",
+        "authorization_prompt_message": "Opening {url}",
+        "success_message": (
+            "Authorisation complete. You can close this tab and return "
+            "to the terminal."
+        ),
+    }
     if use_console:
-        # Fallback for a machine with no usable browser: the client opens
-        # the URL elsewhere and pastes the resulting code back.
-        credentials = flow.run_console()
+        # run_console() was removed from google-auth-oauthlib in 1.0; the
+        # supported fallback is the local server without a browser launch:
+        # the URL is printed for the user to open by hand.
+        flow_kwargs["open_browser"] = False
+        print("\nNo browser will be opened. Copy the URL below into one,")
+        print("sign in as the account that should OWN the Drive folder and")
+        print("Sheet, and approve access.\n")
     else:
         print("\nA browser window will open for Google sign-in.")
         print("Sign in as the account that should OWN the Drive folder and Sheet.\n")
-        credentials = flow.run_local_server(
-            port=0,
-            prompt="consent",
-            access_type="offline",
-            authorization_prompt_message="Opening {url}",
-            success_message=(
-                "Authorisation complete. You can close this tab and return "
-                "to the terminal."
-            ),
-        )
+
+    credentials = flow.run_local_server(**flow_kwargs)
 
     if not credentials.refresh_token:
         raise SystemExit(
-            "Google did not return a refresh token. This usually means the "
-            "account has already authorised this OAuth client. Remove the "
-            "app at https://myaccount.google.com/permissions and rerun."
+            "\n"
+            "========================================================\n"
+            " FAILED: Google did not return a refresh token.\n"
+            "\n"
+            " Without a refresh token the weekly automation cannot\n"
+            " run unattended, so this authorization DID NOT SUCCEED.\n"
+            "\n"
+            " The authorization needs to be repeated with a forced\n"
+            " consent screen. This helper already requests that\n"
+            " (access_type=offline, prompt=consent), so simply run it\n"
+            " again. If it still happens, remove the app's access at\n"
+            " https://myaccount.google.com/permissions and run once\n"
+            " more.\n"
+            "========================================================"
         )
     return credentials
+
+
+def provision(
+    drive,
+    sheets,
+    folder_name: str = DEFAULT_FOLDER_NAME,
+    sheet_name: str = DEFAULT_SHEET_NAME,
+    folder_id: str | None = None,
+    sheet_id: str | None = None,
+) -> dict:
+    """Create or REUSE the Drive folder and spreadsheet, idempotently.
+
+    A rerun of the helper (for example, to mint a new refresh token) must
+    not leave the client with 'NFL Weekly Model (2)' or a second
+    spreadsheet. Everything here looks before it creates:
+
+    * the root folder is found by name (drive.file only ever sees this
+      app's own files, so a name match is the app's own folder);
+    * the ``Model/`` subfolder uses the existing get_or_create helper;
+    * the spreadsheet is found by name and type anywhere the app can see,
+      so it is rediscovered even if an earlier run crashed before moving
+      it into the folder;
+    * ``ensure_tabs`` only adds tabs that are missing;
+    * the move into the folder is skipped when it already happened.
+    """
+    from src.google_drive import (
+        ensure_file_in_folder,
+        ensure_model_folder,
+        find_file_by_name,
+        get_or_create_root_folder,
+    )
+    from src.google_sheets import create_spreadsheet, ensure_tabs
+
+    result = {"folder_created": False, "sheet_created": False}
+
+    if folder_id:
+        print(f"\nUsing the existing Drive folder {folder_id}.")
+    else:
+        folder_id, created = get_or_create_root_folder(drive, folder_name)
+        result["folder_created"] = created
+        if created:
+            print(f"\nCreated Drive folder {folder_name!r}.")
+        else:
+            print(
+                f"\nReusing the existing Drive folder {folder_name!r} from a "
+                "previous authorization - no duplicate was created."
+            )
+
+    ensure_model_folder(drive, folder_id)
+
+    if not sheet_id:
+        sheet_id = find_file_by_name(drive, sheet_name, mime_type=SPREADSHEET_MIME)
+        if sheet_id:
+            print(
+                f"Reusing the existing spreadsheet {sheet_name!r} from a "
+                "previous authorization - no duplicate was created."
+            )
+        else:
+            sheet_id = create_spreadsheet(sheets, sheet_name)
+            result["sheet_created"] = True
+            print(f"Created spreadsheet {sheet_name!r}.")
+    else:
+        print(f"Using the existing spreadsheet {sheet_id}.")
+
+    ensure_tabs(sheets, sheet_id)
+
+    try:
+        ensure_file_in_folder(drive, sheet_id, folder_id)
+    except Exception as exc:  # the Sheet works either way
+        print(f"(Could not move the Sheet into the folder: {exc})")
+
+    result["folder_id"] = folder_id
+    result["sheet_id"] = sheet_id
+    return result
+
+
+def format_secrets_block(
+    client_id: str,
+    client_secret: str,
+    refresh_token: str,
+    folder_id: str,
+    sheet_id: str,
+) -> str:
+    """The final, copy-ready output. This is the ONLY place the refresh
+    token is ever emitted - it is not logged or written to any file."""
+    lines = [
+        "=" * 72,
+        " COPY THESE FIVE VALUES NOW - THEY ARE SHOWN ONLY ONCE",
+        "",
+        " Add each one as a GitHub Actions repository secret:",
+        " Settings -> Secrets and variables -> Actions -> New repository secret",
+        "=" * 72,
+        f"GOOGLE_CLIENT_ID={client_id}",
+        f"GOOGLE_CLIENT_SECRET={client_secret}",
+        f"GOOGLE_REFRESH_TOKEN={refresh_token}",
+        f"GOOGLE_DRIVE_FOLDER_ID={folder_id}",
+        f"GOOGLE_SHEET_ID={sheet_id}",
+        "=" * 72,
+        " DO NOT CLOSE THIS WINDOW until all five values are copied.",
+        " They are secrets: never paste them into email, chat or screenshots.",
+        "=" * 72,
+    ]
+    return "\n".join(lines)
 
 
 def main() -> int:
@@ -131,12 +284,12 @@ def main() -> int:
     parser.add_argument(
         "--drive-folder-id",
         default=None,
-        help="Reuse an existing folder instead of creating one.",
+        help="Reuse an existing folder instead of discovering/creating one.",
     )
     parser.add_argument(
         "--sheet-id",
         default=None,
-        help="Reuse an existing spreadsheet instead of creating one.",
+        help="Reuse an existing spreadsheet instead of discovering/creating one.",
     )
     parser.add_argument(
         "--scope-drive-full",
@@ -149,7 +302,7 @@ def main() -> int:
     parser.add_argument(
         "--console",
         action="store_true",
-        help="Use the copy/paste console flow instead of a local browser.",
+        help="Do not launch a browser; print the sign-in URL to copy by hand.",
     )
     args = parser.parse_args()
 
@@ -162,7 +315,8 @@ def main() -> int:
             "In Google Cloud Console:\n"
             "  1. create/select a project (suggested name: NFL Weekly Automation)\n"
             "  2. enable the Google Drive API and the Google Sheets API\n"
-            "  3. configure the OAuth consent screen\n"
+            "  3. configure the OAuth consent screen and PUBLISH it\n"
+            "     ('In production' - Testing tokens die after 7 days)\n"
             "  4. create an OAuth client ID of type 'Desktop app'\n"
             "  5. download the JSON and pass it with --client-secrets\n",
             file=sys.stderr,
@@ -178,71 +332,45 @@ def main() -> int:
 
     from googleapiclient.discovery import build
 
-    from src.google_drive import create_root_folder, ensure_model_folder
-    from src.google_sheets import ALL_TABS, create_spreadsheet, ensure_tabs
-
     drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
     sheets = build("sheets", "v4", credentials=credentials, cache_discovery=False)
 
-    folder_id = args.drive_folder_id
-    if folder_id:
-        print(f"\nUsing the existing Drive folder {folder_id}.")
-    else:
-        folder_id = create_root_folder(drive, args.folder_name)
-        print(f"\nCreated Drive folder {args.folder_name!r}.")
-
-    # Create the Model subfolder now so the first cloud run has somewhere
-    # to persist the trained model.
-    ensure_model_folder(drive, folder_id)
-    print("Created the 'Model' subfolder for model persistence.")
-
-    sheet_id = args.sheet_id
-    if sheet_id:
-        ensure_tabs(sheets, sheet_id)
-        print(f"Using the existing spreadsheet {sheet_id} (tabs verified).")
-    else:
-        sheet_id = create_spreadsheet(sheets, args.sheet_name)
-        print(f"Created spreadsheet {args.sheet_name!r} with tabs: "
-              f"{', '.join(ALL_TABS)}.")
-        # Move the new Sheet into the client's folder so everything lives
-        # together. Harmless if it fails - the Sheet still works.
-        try:
-            file = drive.files().get(fileId=sheet_id, fields="parents").execute()
-            drive.files().update(
-                fileId=sheet_id,
-                addParents=folder_id,
-                removeParents=",".join(file.get("parents", [])),
-                fields="id, parents",
-            ).execute()
-            print("Moved the spreadsheet into the NFL Weekly Model folder.")
-        except Exception as exc:
-            print(f"(Could not move the Sheet into the folder: {exc})")
+    resources = provision(
+        drive,
+        sheets,
+        folder_name=args.folder_name,
+        sheet_name=args.sheet_name,
+        folder_id=args.drive_folder_id,
+        sheet_id=args.sheet_id,
+    )
+    folder_id = resources["folder_id"]
+    sheet_id = resources["sheet_id"]
 
     client_config = json.loads(args.client_secrets.read_text())
     installed = client_config.get("installed") or client_config.get("web") or {}
 
-    print("\n" + "=" * 72)
-    print("ADD THESE FIVE GITHUB ACTIONS SECRETS")
-    print("Repository -> Settings -> Secrets and variables -> Actions -> New secret")
-    print("=" * 72)
-    print(f"GOOGLE_CLIENT_ID\n    {installed.get('client_id', '')}\n")
-    print(f"GOOGLE_CLIENT_SECRET\n    {installed.get('client_secret', '')}\n")
-    print(f"GOOGLE_REFRESH_TOKEN\n    {credentials.refresh_token}\n")
-    print(f"GOOGLE_DRIVE_FOLDER_ID\n    {folder_id}\n")
-    print(f"GOOGLE_SHEET_ID\n    {sheet_id}\n")
-    print("=" * 72)
     print(
-        "\nSpreadsheet: "
+        "\nSpreadsheet:  "
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
     )
     print(f"Drive folder: https://drive.google.com/drive/folders/{folder_id}")
     print(
         "\nNEXT STEPS\n"
-        "  1. Paste the five values above into GitHub Actions secrets.\n"
+        "  1. Copy the five values below into GitHub Actions secrets.\n"
         "  2. Delete the client_secret.json file from this machine.\n"
         "  3. Trigger Actions -> NFL Weekly Automation -> Run workflow.\n"
-        "\nThese values are secrets: do not paste them into email, chat or "
-        "screenshots.\n"
+    )
+
+    # The secrets block is deliberately the very last output so it is on
+    # screen when the window pauses.
+    print(
+        format_secrets_block(
+            client_id=installed.get("client_id", ""),
+            client_secret=installed.get("client_secret", ""),
+            refresh_token=credentials.refresh_token,
+            folder_id=folder_id,
+            sheet_id=sheet_id,
+        )
     )
     return 0
 

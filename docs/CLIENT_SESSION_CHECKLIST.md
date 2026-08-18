@@ -54,10 +54,16 @@ Ground rules for the whole session:
 - [ ] Confirm the console shows exactly one requested scope:
       `https://www.googleapis.com/auth/drive.file`.
 - [ ] David approves on Google's consent page.
-- [ ] The helper creates the **NFL Weekly Model** Drive folder (with its
-      `Model/` subfolder), creates the **NFL Weekly Analytics** spreadsheet
-      with all five tabs, moves the Sheet into the folder, and prints five
-      values.
+- [ ] The helper creates — or on a rerun **reuses** — the **NFL Weekly
+      Model** Drive folder (with its `Model/` subfolder) and the **NFL
+      Weekly Analytics** spreadsheet with all five tabs, then ends with the
+      five secret values as the **very last output**.
+- [ ] **Copy the five `GOOGLE_*=` lines before the window is closed.**
+      They are displayed exactly once and are not saved anywhere. If the
+      window is closed too early, simply run the helper again: the flow
+      forces a fresh consent (`prompt=consent`), so Google issues a new
+      refresh token with no need to revoke anything, and the existing
+      folder/Sheet are reused — no duplicates.
 
 ## 4. GitHub secrets
 
@@ -107,6 +113,7 @@ Ground rules for the whole session:
 | Symptom | Likely cause / fix |
 |---|---|
 | `invalid_grant` on a later run | Token was minted while the app was in "Testing" (7-day revocation). Publish to "In production", rerun the helper, update `GOOGLE_REFRESH_TOKEN`. |
+| Window closed before the five values were copied | Run the helper again. It forces a new consent and mints a fresh refresh token (no revocation needed) and reuses the existing folder/Sheet — no duplicates. |
 | Google 404 for folder or Sheet | The ID belongs to a hand-made item, invisible under `drive.file`. Use the IDs the helper printed. |
 | No refresh token returned | The account already authorized this OAuth client once. Remove the app at [myaccount.google.com/permissions](https://myaccount.google.com/permissions) and rerun the helper. |
 | Scheduled run absent | GitHub disables schedules after 60 days of repo inactivity; any commit or manual run re-enables. Scheduled starts can also lag under platform load. |
