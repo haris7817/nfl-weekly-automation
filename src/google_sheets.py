@@ -13,15 +13,18 @@ Run Log                 one appended row per run
 Every update is idempotent (25): rerunning the same week overwrites that
 week's history rows rather than appending a second copy, so the client can
 safely trigger a manual run twice without corrupting the history tab.
+
+pandas and ``fair_line`` are imported lazily inside the functions that use
+them. The one-time client authorization package ships this module for
+``create_spreadsheet``/``ensure_tabs`` only, with just the Google client
+libraries installed - top-level analytics imports would break it for no
+benefit. The weekly runner exercises the pandas paths as before.
 """
 
 from __future__ import annotations
 
 from typing import Optional, Sequence
 
-import pandas as pd
-
-from .fair_line import FAIR_LINE_COLUMNS
 from .google_api import execute
 from .logging_utils import get_logger
 
@@ -89,6 +92,8 @@ RUN_LOG_HEADERS = [
 
 def _cell(value):
     """Convert a pandas value into something the Sheets API accepts."""
+    import pandas as pd  # lazy: see module docstring
+
     if value is None:
         return ""
     try:
@@ -101,7 +106,7 @@ def _cell(value):
     return str(value)
 
 
-def _frame_to_values(df: pd.DataFrame, columns: Sequence[str]) -> list:
+def _frame_to_values(df, columns: Sequence[str]) -> list:
     return [[_cell(row[column]) for column in columns] for _, row in df.iterrows()]
 
 
@@ -176,7 +181,9 @@ def read_tab(service, spreadsheet_id: str, title: str) -> list:
 # Tab writers
 # ---------------------------------------------------------------------
 
-def update_latest_predictions(service, spreadsheet_id: str, df: pd.DataFrame) -> None:
+def update_latest_predictions(service, spreadsheet_id: str, df) -> None:
+    from .fair_line import FAIR_LINE_COLUMNS  # lazy: see module docstring
+
     replace_tab(
         service,
         spreadsheet_id,
@@ -186,7 +193,7 @@ def update_latest_predictions(service, spreadsheet_id: str, df: pd.DataFrame) ->
     )
 
 
-def update_epa_splits(service, spreadsheet_id: str, df: pd.DataFrame) -> None:
+def update_epa_splits(service, spreadsheet_id: str, df) -> None:
     columns = [
         "season",
         "analysis_week",
@@ -223,7 +230,7 @@ def update_model_info(service, spreadsheet_id: str, rows: Sequence[Sequence]) ->
 def upsert_prediction_history(
     service,
     spreadsheet_id: str,
-    df: pd.DataFrame,
+    df,
 ) -> dict:
     """Merge this week's rows into Prediction History without duplicating.
 
@@ -232,6 +239,8 @@ def upsert_prediction_history(
     the same week therefore refreshes that week rather than appending a
     second set (implementation guide 25 / 31.7).
     """
+    from .fair_line import FAIR_LINE_COLUMNS  # lazy: see module docstring
+
     existing = read_tab(service, spreadsheet_id, TAB_HISTORY)
 
     new_values = _frame_to_values(df, FAIR_LINE_COLUMNS)
@@ -321,8 +330,8 @@ def create_spreadsheet(service, title: str) -> str:
 def sync_all(
     service,
     spreadsheet_id: str,
-    epa_df: pd.DataFrame,
-    predictions_df: pd.DataFrame,
+    epa_df,
+    predictions_df,
     model_rows: Sequence[Sequence],
     run_log_row: Optional[Sequence] = None,
 ) -> dict:

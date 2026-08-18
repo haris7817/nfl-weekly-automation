@@ -11,6 +11,11 @@ token.pickle
 service-account*.json
 *-service-account.json
 
+# One-time client authorization package (contains client_secret.json).
+# Built locally, handed to the client directly - never through git.
+client_setup/
+David_Google_Setup.zip
+
 # --- local machine helpers (CA bundles, scratch) ---------------------
 .local/
 
