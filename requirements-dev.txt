@@ -1,0 +1,5 @@
+# Development-only dependencies. Not installed by the GitHub Actions
+# production job; the test job installs both files.
+-r requirements.txt
+
+pytest==9.1.1

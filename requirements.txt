@@ -1,0 +1,32 @@
+# NFL Weekly Analytics Automation - pinned, tested dependency set.
+#
+# Verified end-to-end on Python 3.13.7 (Windows 11) and used unchanged by
+# the GitHub Actions workflow, which pins the same Python version so the
+# cloud run matches what was tested locally.
+#
+# Regenerate after upgrading anything:
+#   pip install -r requirements.txt && pytest -q && python weekly_runner.py --dry-run --skip-google
+
+# --- NFL data -------------------------------------------------------
+nflreadpy==0.1.5
+polars==1.43.2            # nflreadpy's native frame type
+pyarrow==25.0.1           # parquet reader behind nflreadpy
+
+# --- analytics ------------------------------------------------------
+pandas==3.0.5
+numpy==2.5.2
+scikit-learn==1.9.0
+scipy==1.18.0
+joblib==1.5.3
+
+# --- Google Drive + Sheets -----------------------------------------
+google-api-python-client==2.198.0
+google-auth==2.56.3
+google-auth-oauthlib==1.4.0
+google-auth-httplib2==0.4.1
+
+# --- runtime support ------------------------------------------------
+python-dotenv==1.2.3
+requests==2.34.2
+tzdata==2026.3            # IANA zone data for America/Los_Angeles on Windows
+truststore==0.10.4        # use the OS certificate store (see README: TLS notes)

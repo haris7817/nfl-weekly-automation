@@ -1,0 +1,7 @@
+# Normalise line endings. The GitHub Actions runner is Linux, and a
+# workflow YAML checked out with CRLF breaks its `run:` shell steps.
+* text=auto eol=lf
+
+*.png binary
+*.pkl binary
+*.parquet binary

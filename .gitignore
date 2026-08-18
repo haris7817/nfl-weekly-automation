@@ -1,0 +1,44 @@
+# --- secrets: never commit any of these ------------------------------
+.env
+.env.*
+!.env.example
+credentials.json
+client_secret*.json
+google_credentials.json
+token.json
+token.pickle
+*refresh_token*
+service-account*.json
+*-service-account.json
+
+# --- local machine helpers (CA bundles, scratch) ---------------------
+.local/
+
+# --- python ----------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- generated artefacts ---------------------------------------------
+logs/*.log
+logs/*.log.*
+
+outputs/*
+!outputs/.gitkeep
+
+# The production model is persisted to Google Drive, not to git.
+# See README "Model persistence" - GitHub runners are ephemeral.
+models/*
+!models/.gitkeep
+
+# --- editors / OS -----------------------------------------------------
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

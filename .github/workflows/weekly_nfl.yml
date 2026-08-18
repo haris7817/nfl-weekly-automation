@@ -1,0 +1,158 @@
+name: NFL Weekly Automation
+
+# ---------------------------------------------------------------------
+# Schedule: every Friday at 18:00 America/Los_Angeles.
+#
+# GitHub Actions cron is ALWAYS UTC - the `schedule:` block has no
+# timezone key (that syntax belongs to other CI systems). So Pacific time
+# is handled the supported way: fire at both possible UTC equivalents and
+# let a guard step decide which one is really 18:00 in Los Angeles.
+#
+#   18:00 PDT (UTC-7, roughly Mar-Nov) -> 01:00 UTC Saturday
+#   18:00 PST (UTC-8, roughly Nov-Mar) -> 02:00 UTC Saturday
+#
+# Exactly one of the two passes the guard on any given Friday, so the
+# workflow runs once a week across daylight-saving changes without the
+# schedule ever being edited.
+#
+# Note: GitHub may start a scheduled job late when the platform is busy.
+# Treat 18:00 as a target, not a hard deadline.
+# ---------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: "Season override (leave blank to auto-detect). Use with week."
+        required: false
+        type: string
+      week:
+        description: "Week override (leave blank to auto-detect). Use with season."
+        required: false
+        type: string
+      retrain:
+        description: "Force model retraining"
+        required: false
+        type: boolean
+        default: false
+      include_completed:
+        description: "Project games that already kicked off (historical reruns)"
+        required: false
+        type: boolean
+        default: false
+      skip_google:
+        description: "Skip Drive upload and Sheet update (analytics only)"
+        required: false
+        type: boolean
+        default: false
+
+  schedule:
+    - cron: "0 1 * * 6"   # 18:00 Friday Pacific Daylight Time
+    - cron: "0 2 * * 6"   # 18:00 Friday Pacific Standard Time
+
+# Never let two runs publish to the same Sheet at once.
+concurrency:
+  group: nfl-weekly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run-weekly-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Confirm this is really Friday 18:00 in Los Angeles
+        id: guard
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "Manual run - skipping the time guard."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PACIFIC_DOW=$(TZ=America/Los_Angeles date +%u)   # 1=Monday .. 5=Friday
+          PACIFIC_HOUR=$(TZ=America/Los_Angeles date +%H)
+          PACIFIC_NOW=$(TZ=America/Los_Angeles date -Is)
+          echo "Pacific time is now $PACIFIC_NOW (day $PACIFIC_DOW, hour $PACIFIC_HOUR)."
+          if [ "$PACIFIC_DOW" = "5" ] && [ "$PACIFIC_HOUR" = "18" ]; then
+            echo "This is the real Friday 18:00 Pacific slot - proceeding."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "This cron fired for the other daylight-saving offset - skipping."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.guard.outputs.proceed == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        if: steps.guard.outputs.proceed == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build run arguments
+        if: steps.guard.outputs.proceed == 'true'
+        id: args
+        run: |
+          set -euo pipefail
+          ARGS=""
+          SEASON="${{ inputs.season }}"
+          WEEK="${{ inputs.week }}"
+          if [ -n "$SEASON" ] && [ -n "$WEEK" ]; then
+            ARGS="$ARGS --season $SEASON --week $WEEK"
+          elif [ -n "$SEASON" ] || [ -n "$WEEK" ]; then
+            echo "::error::season and week must be supplied together."
+            exit 1
+          fi
+          [ "${{ inputs.retrain }}" = "true" ] && ARGS="$ARGS --retrain"
+          [ "${{ inputs.include_completed }}" = "true" ] && ARGS="$ARGS --include-completed"
+          [ "${{ inputs.skip_google }}" = "true" ] && ARGS="$ARGS --skip-google"
+          echo "Runner arguments:$ARGS"
+          echo "value=$ARGS" >> "$GITHUB_OUTPUT"
+
+      - name: Run weekly workflow
+        if: steps.guard.outputs.proceed == 'true'
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          TRAILING_GAMES_N: ${{ vars.TRAILING_GAMES_N || '5' }}
+          TRAINING_START_SEASON: ${{ vars.TRAINING_START_SEASON || '2021' }}
+          RETRAIN_EVERY_WEEKS: ${{ vars.RETRAIN_EVERY_WEEKS || '4' }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+        run: python weekly_runner.py ${{ steps.args.outputs.value }}
+
+      # Runs even when the step above failed, so a Google outage still
+      # leaves the analytics downloadable from the run page.
+      - name: Upload CSV outputs
+        if: always() && steps.guard.outputs.proceed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfl-outputs-${{ github.run_number }}
+          path: |
+            outputs/**
+            models/model_metadata.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Upload logs
+        if: always() && steps.guard.outputs.proceed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfl-logs-${{ github.run_number }}
+          path: logs/**
+          if-no-files-found: ignore
+          retention-days: 30
